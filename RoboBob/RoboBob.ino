@@ -1,3 +1,4 @@
+#include <EEPROM.h>
 #include <Servo.h>
 
 #define servo1Pin           11
@@ -11,30 +12,36 @@
 #define button2Pin           4      // claw button
 #define ledPin               2
 
-#define servoDelayPerAngle   1
+enum State { START, RUN_SEQUNECE, WAINT_FOR_POSITION, SAVE_POSITION };
 
-enum state {
-  start,
-  runSequence,
-  waitForPosition,
-  savePosition
-};
+typedef struct {
+  byte servo1,servo2,servo3;
+  bool isClawClosed;
+} ServoStatus;
+
+typedef struct {
+  long timestamp;
+  int sleepTime;
+  bool isThreadAlive;
+} Thread;
 
 Servo ClawServo;
 Servo servo1;
 Servo servo2;
 Servo servo3;
 
-bool clawClosed = false;
+ServoStatus currentServoPoint = {0, 0, 0, false};
 
-long lastLedChangedTimestamp = 0;
-int blinkDelay = 25;
+// define a thread for blinking led
+Thread blinkThred = {0, 25, true};
 int blinkLedState = LOW;
 
-long mainThreadTimestamp = 0;
-int mainThreadDelay = 0; // none
+// define a main thread
+Thread mainThread = {0, 0, true};
+// define a thread for servo motors - not active
+Thread servoThread = {0, 0, false};
 
-state currentState = start;
+State currentState = START;
 
 void setup() {
   // inti all servos
@@ -57,83 +64,148 @@ void loop() {
 
   runLedThread();
   runMainThread();
-
-  if (Serial.available() > 0) {
-    int value = Serial.parseInt();
-  }
+  runServoThread();
+  //  if (Serial.available() > 0) {
+  //    int value = Serial.parseInt();
+  //  }
 }
 
-// ********************* main ******************
+// ********************* main thread ******************
+void mainThreadSleep(int milliseconds) {
+  mainThread.sleepTime += milliseconds;
+}
+
 void runMainThread() {
-  if ( millis() - mainThreadTimestamp > mainThreadDelay ) {
-    mainThreadDelay = 0; // reset delay
-    
+  if (mainThread.isThreadAlive && (millis() - mainThread.timestamp > mainThread.sleepTime )) {
+    mainThread.sleepTime = 0; // reset delay
+
     switch (currentState) {
-      case start:
+      case START:
         if (haveSavedSequence()) {
-          currentState = runSequence;
+          currentState = RUN_SEQUNECE;
           turnLedOn();
         }
         break;
-      case runSequence:
-        // TODO: read servos step
-        // TODO: move servos
-        // TODO: delay ?? sau delay in move servos
+      case RUN_SEQUNECE:
+        startServoThread();
         if (isClawButtonPressed() || isFunctionalButtonPressed()) {
           blinkLedSlow();
-          currentState = waitForPosition;
+          stopServoThread();
+          // TODO: clean all the EEPROM memory and wait for new instructions set
+          currentState = WAINT_FOR_POSITION;
         }
         break;
-      case waitForPosition:
+      case WAINT_FOR_POSITION:
         if (isFunctionalButtonPressed()) {
           blinkLedFast();
-          currentState = savePosition;
+          currentState = SAVE_POSITION;
         } else if (isClawButtonPressed()) {
           closeOpenClaw();
         }
         break;
-      case savePosition:
+      case SAVE_POSITION:
         // TODO: read servos positions and claw
         saveServoPositions();
-        mainThreadDelay = 200; // short delay on main thread
+        mainThreadSleep(200); // short delay on main thread
         if (isFunctionalButtonPressed()) {
           turnLedOn();
-          currentState = runSequence;
+          currentState = RUN_SEQUNECE;
         } else {
           blinkLedSlow();
-          currentState = waitForPosition;
+          currentState = WAINT_FOR_POSITION;
         }
         break;
     }
-    mainThreadTimestamp = millis();
+    mainThread.timestamp = millis();
   }
+}
+
+// ********************* servos thread ****************
+void startServoThread() {
+  if (servoThread.isThreadAlive == false) {
+    servoThread.isThreadAlive = true;
+    servoThread.timestamp = millis();
+  }
+}
+void stopServoThread() {
+  servoThread.isThreadAlive = false;
+}
+void runServoThread() {
+  if (servoThread.isThreadAlive && (millis() - servoThread.timestamp > servoThread.sleepTime )) {
+    // TODO: read servos step
+    moveServos();
+    servoThread.timestamp = millis();
+  }
+}
+
+void moveServos() {
+  // move all servos to the position in the
+  servo1.write(currentServoPoint.servo1);
+  servo2.write(currentServoPoint.servo2);
+  servo3.write(currentServoPoint.servo3);
+  if (currentServoPoint.isClawClosed) {
+    ClawServo.write(0);
+  } else {
+    ClawServo.write(180);
+  }
+
+  servoThreadSleep(1000);
+}
+void servoThreadSleep(int milliseconds) {
+  servoThread.sleepTime = milliseconds;
+}
+
+// ********************* claw ******************
+void closeOpenClaw() {
+  if (currentServoPoint.isClawClosed) {
+    ClawServo.write(0);
+  } else {
+    ClawServo.write(180);
+  }
+  currentServoPoint.isClawClosed = !currentServoPoint.isClawClosed;
+
+  mainThreadSleep(200); // short delay on main thread
 }
 
 // ********************* data ******************
 bool haveSavedSequence() {
+  // TODO: read first byte from EEPROM
+  //  if not 0 return true
   return true;
 }
-void saveServoPositions() {} //http://forum.arduino.cc/index.php?topic=155924.0
-void readServoStep() {}
+void saveServoPositions() {
+  // TODO: write the number of the step - like a counter 
+  // and all the values from the structure
+} //http://forum.arduino.cc/index.php?topic=155924.0
+void readServoStep() {
+  // TODO: read the first byte ( the counter )
+  // and then the values 4 in the structure
+  // if the first byte is 0 we are at the end
+}
 
-// ********************* blinking led **********
+// TODO: function that puts all EEPROM to 0 
+
+// ********************* blinking led thread **********
 void runLedThread() {
-  if ( millis() - lastLedChangedTimestamp > blinkDelay ) {
+  if ( blinkThred.isThreadAlive && ( millis() - blinkThred.timestamp > blinkThred.sleepTime) ) {
 
     digitalWrite(ledPin, blinkLedState);
     blinkLedState = !blinkLedState;
-    lastLedChangedTimestamp = millis();
+    blinkThred.timestamp = millis();
   }
 }
 
 void turnLedOn() {
-  blinkDelay = 20;
+  blinkLedThreadSleep(20);
 }
 void blinkLedSlow() {
-  blinkDelay = 1000;
+  blinkLedThreadSleep(1000);
 }
 void blinkLedFast() {
-  blinkDelay = 250;
+  blinkLedThreadSleep(250);
+}
+void blinkLedThreadSleep(int milliseconds) {
+  blinkThred.sleepTime = milliseconds;
 }
 
 // ********************* buttons ***************
@@ -152,17 +224,10 @@ bool isFunctionalButtonPressed() {
   return readButtonStateForPin(button1Pin);
 }
 
-// ********************* claw ******************
-void closeOpenClaw() {
-  if (clawClosed) {
-    ClawServo.write(0);
-  } else {
-    ClawServo.write(180);
-  }
-  clawClosed = !clawClosed;
 
-  mainThreadDelay = 200; // short delay on main thread
-}
+
+
+
 
 //void readServos() {
 //  int servoVal[3];
