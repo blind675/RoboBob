@@ -99,7 +99,10 @@ void runMainThread() {
         }
         break;
       case WAINT_FOR_POSITION:
-        Serial.println("**** WAINT FOR POSITION state ****");       
+        Serial.println("**** WAINT FOR POSITION state ****");     
+
+        readServosPossitionDEBUG();
+          
         if (isFunctionalButtonPressed()) {
           blinkLedFast();
           currentState = SAVE_POSITION;
@@ -116,13 +119,16 @@ void runMainThread() {
           // go to start .. i guess
           currentState = START;
         } 
+        
         Serial.print(" Written structure to the address: ");
         Serial.println(EEPROMAddress);
         printCurentServoPointsDEBUG();
-        mainThreadSleep(200); // short delay on main thread
+        
+        mainThreadSleep(500); // short delay on main thread
         if (isFunctionalButtonPressed()) {
           turnLedOn();
           currentState = RUN_SEQUNECE;
+          mainThreadSleep(500);
         } else {
           blinkLedSlow();
           currentState = WAINT_FOR_POSITION;
@@ -143,6 +149,9 @@ void startServoThread() {
 }
 void stopServoThread() {
   servoThread.isThreadAlive = false;
+  // this is not he correct possition but i can't find a better one
+  currentServoPoint.stepCount = 0;
+  EEPROMAddress = 0;
 }
 void runServoThread() {
   if (servoThread.isThreadAlive && (millis() - servoThread.timestamp > servoThread.sleepTime )) {
@@ -186,7 +195,7 @@ void closeOpenClaw() {
     ClawServo.write(180);
   }
   currentServoPoint.isClawClosed = !currentServoPoint.isClawClosed;
-  mainThreadSleep(200); // short delay on main thread
+  mainThreadSleep(200); // short delay on main thread ... why main ??
 }
 
 // ********************* data ******************
@@ -201,27 +210,12 @@ bool saveServoPositionsToEEPROM() {
   // and all the values from the structure
   currentServoPoint.stepCount += 1;
   EEPROM.write(EEPROMAddress, currentServoPoint.stepCount); EEPROMAddress += 1;
-  if (EEPROMAddress == EEPROM.length()) {
-    EEPROMAddress = 0;
-    return false;
-  }
   EEPROM.write(EEPROMAddress, currentServoPoint.servo1); EEPROMAddress += 1;
-  if (EEPROMAddress == EEPROM.length()) {
-    EEPROMAddress = 0;
-    return false;
-  }
   EEPROM.write(EEPROMAddress, currentServoPoint.servo2); EEPROMAddress += 1;
-  if (EEPROMAddress == EEPROM.length()) {
-    EEPROMAddress = 0;
-    return false;
-  }
   EEPROM.write(EEPROMAddress, currentServoPoint.servo3); EEPROMAddress += 1;
-  if (EEPROMAddress == EEPROM.length()) {
-    EEPROMAddress = 0;
-    return false;
-  }
   EEPROM.write(EEPROMAddress, currentServoPoint.isClawClosed); EEPROMAddress += 1;
-  if (EEPROMAddress == EEPROM.length()) {
+  
+  if (EEPROMAddress > 100) {
     EEPROMAddress = 0;
     return false;
   }
@@ -233,6 +227,7 @@ bool readServoStepFromEEPROM() {
   // if the first byte is 0 we are at the end
   byte stepCount = EEPROM.read(EEPROMAddress); EEPROMAddress += 1;
   if (stepCount == 0) {
+    EEPROMAddress = 0;
     return false;
   } else {
     currentServoPoint.stepCount = stepCount;
@@ -245,9 +240,9 @@ bool readServoStepFromEEPROM() {
 }
 // function that puts all EEPROM to 0
 void clearEEPROM() {
-  // this is not he correct possition but i can't find a better one
-  currentServoPoint.stepCount = 0;
-  for (int i = 0 ; i < EEPROM.length() ; i++) {
+  // only use the first100 bytes of eeprom 
+  // to prevent memory use in time
+  for (int i = 0 ; i < 104 ; i++) {
     EEPROM.write(i, 0);
   }
 }
