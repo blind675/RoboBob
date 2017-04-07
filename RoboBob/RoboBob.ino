@@ -15,7 +15,7 @@
 enum State { START, RUN_SEQUNECE, WAINT_FOR_POSITION, SAVE_POSITION };
 
 typedef struct {
-  byte servo1,servo2,servo3;
+  byte stepCount, servo1, servo2, servo3;
   bool isClawClosed;
 } ServoStatus;
 
@@ -32,15 +32,15 @@ Servo servo3;
 
 ServoStatus currentServoPoint = {0, 0, 0, false};
 
+int blinkLedState = LOW;
 // define a thread for blinking led
 Thread blinkThred = {0, 25, true};
-int blinkLedState = LOW;
-
 // define a main thread
 Thread mainThread = {0, 0, true};
 // define a thread for servo motors - not active
 Thread servoThread = {0, 0, false};
 
+int EEPROMAddress = 0;
 State currentState = START;
 
 void setup() {
@@ -58,16 +58,15 @@ void setup() {
   //  analogReference(INTERNAL2V56);
 
   Serial.begin(9600);
+
+  // generate some debug data and write it to EEPROM
+  writeEEPROMValuesDEBUG();
 }
 
 void loop() {
-
   runLedThread();
-  runMainThread();
   runServoThread();
-  //  if (Serial.available() > 0) {
-  //    int value = Serial.parseInt();
-  //  }
+  runMainThread();
 }
 
 // ********************* main thread ******************
@@ -77,25 +76,30 @@ void mainThreadSleep(int milliseconds) {
 
 void runMainThread() {
   if (mainThread.isThreadAlive && (millis() - mainThread.timestamp > mainThread.sleepTime )) {
-    mainThread.sleepTime = 0; // reset delay
+    mainThread.sleepTime = 100; // reset delay - some delay so print looks ok
 
     switch (currentState) {
       case START:
+        Serial.println("**** START state ****");
         if (haveSavedSequence()) {
           currentState = RUN_SEQUNECE;
           turnLedOn();
+        } else {
+          currentState = WAINT_FOR_POSITION;
         }
         break;
       case RUN_SEQUNECE:
+        Serial.println("**** RUN SEQUNECE state ****");
         startServoThread();
         if (isClawButtonPressed() || isFunctionalButtonPressed()) {
           blinkLedSlow();
           stopServoThread();
-          // TODO: clean all the EEPROM memory and wait for new instructions set
+          clearEEPROM();
           currentState = WAINT_FOR_POSITION;
         }
         break;
       case WAINT_FOR_POSITION:
+        Serial.println("**** WAINT FOR POSITION state ****");       
         if (isFunctionalButtonPressed()) {
           blinkLedFast();
           currentState = SAVE_POSITION;
@@ -104,8 +108,17 @@ void runMainThread() {
         }
         break;
       case SAVE_POSITION:
-        // TODO: read servos positions and claw
-        saveServoPositions();
+        Serial.println("**** SAVE POSITION state ****");
+        // TODO: uncomment in production
+        // readServosPossition();
+        if (saveServoPositionsToEEPROM() == false) {
+          // full EEPROM .. what arte the odds
+          // go to start .. i guess
+          currentState = START;
+        } 
+        Serial.print(" Written structure to the address: ");
+        Serial.println(EEPROMAddress);
+        printCurentServoPointsDEBUG();
         mainThreadSleep(200); // short delay on main thread
         if (isFunctionalButtonPressed()) {
           turnLedOn();
@@ -123,6 +136,7 @@ void runMainThread() {
 // ********************* servos thread ****************
 void startServoThread() {
   if (servoThread.isThreadAlive == false) {
+    EEPROMAddress = 0;
     servoThread.isThreadAlive = true;
     servoThread.timestamp = millis();
   }
@@ -132,13 +146,23 @@ void stopServoThread() {
 }
 void runServoThread() {
   if (servoThread.isThreadAlive && (millis() - servoThread.timestamp > servoThread.sleepTime )) {
-    // TODO: read servos step
+    if ( readServoStepFromEEPROM() == false ) {
+      // reached the end - go to the begining of the EEPROM
+      EEPROMAddress = 0;
+      readServoStepFromEEPROM();
+    }
     moveServos();
     servoThread.timestamp = millis();
   }
 }
 
 void moveServos() {
+  
+  Serial.print(" + Current eeprom address: ");
+  Serial.println(EEPROMAddress);
+  Serial.println(" + Move servos to positions:");
+  printCurentServoPointsDEBUG();
+  
   // move all servos to the position in the
   servo1.write(currentServoPoint.servo1);
   servo2.write(currentServoPoint.servo2);
@@ -148,8 +172,7 @@ void moveServos() {
   } else {
     ClawServo.write(180);
   }
-
-  servoThreadSleep(1000);
+  servoThreadSleep(1500);
 }
 void servoThreadSleep(int milliseconds) {
   servoThread.sleepTime = milliseconds;
@@ -163,38 +186,79 @@ void closeOpenClaw() {
     ClawServo.write(180);
   }
   currentServoPoint.isClawClosed = !currentServoPoint.isClawClosed;
-
   mainThreadSleep(200); // short delay on main thread
 }
 
 // ********************* data ******************
 bool haveSavedSequence() {
-  // TODO: read first byte from EEPROM
-  //  if not 0 return true
+  // read first byte from EEPROM
+  // if not 0 return true
+  EEPROMAddress = 0;
+  return readServoStepFromEEPROM();
+}
+bool saveServoPositionsToEEPROM() {
+  // write the number of the step - like a counter
+  // and all the values from the structure
+  currentServoPoint.stepCount += 1;
+  EEPROM.write(EEPROMAddress, currentServoPoint.stepCount); EEPROMAddress += 1;
+  if (EEPROMAddress == EEPROM.length()) {
+    EEPROMAddress = 0;
+    return false;
+  }
+  EEPROM.write(EEPROMAddress, currentServoPoint.servo1); EEPROMAddress += 1;
+  if (EEPROMAddress == EEPROM.length()) {
+    EEPROMAddress = 0;
+    return false;
+  }
+  EEPROM.write(EEPROMAddress, currentServoPoint.servo2); EEPROMAddress += 1;
+  if (EEPROMAddress == EEPROM.length()) {
+    EEPROMAddress = 0;
+    return false;
+  }
+  EEPROM.write(EEPROMAddress, currentServoPoint.servo3); EEPROMAddress += 1;
+  if (EEPROMAddress == EEPROM.length()) {
+    EEPROMAddress = 0;
+    return false;
+  }
+  EEPROM.write(EEPROMAddress, currentServoPoint.isClawClosed); EEPROMAddress += 1;
+  if (EEPROMAddress == EEPROM.length()) {
+    EEPROMAddress = 0;
+    return false;
+  }
   return true;
 }
-void saveServoPositions() {
-  // TODO: write the number of the step - like a counter 
-  // and all the values from the structure
-} //http://forum.arduino.cc/index.php?topic=155924.0
-void readServoStep() {
-  // TODO: read the first byte ( the counter )
+bool readServoStepFromEEPROM() {
+  // read the first byte ( the counter )
   // and then the values 4 in the structure
   // if the first byte is 0 we are at the end
+  byte stepCount = EEPROM.read(EEPROMAddress); EEPROMAddress += 1;
+  if (stepCount == 0) {
+    return false;
+  } else {
+    currentServoPoint.stepCount = stepCount;
+  }
+  currentServoPoint.servo1 = EEPROM.read(EEPROMAddress); EEPROMAddress += 1;
+  currentServoPoint.servo2 = EEPROM.read(EEPROMAddress); EEPROMAddress += 1;
+  currentServoPoint.servo3 = EEPROM.read(EEPROMAddress); EEPROMAddress += 1;
+  currentServoPoint.isClawClosed = EEPROM.read(EEPROMAddress); EEPROMAddress += 1;
+  return true;
 }
-
-// TODO: function that puts all EEPROM to 0 
-
+// function that puts all EEPROM to 0
+void clearEEPROM() {
+  // this is not he correct possition but i can't find a better one
+  currentServoPoint.stepCount = 0;
+  for (int i = 0 ; i < EEPROM.length() ; i++) {
+    EEPROM.write(i, 0);
+  }
+}
 // ********************* blinking led thread **********
 void runLedThread() {
   if ( blinkThred.isThreadAlive && ( millis() - blinkThred.timestamp > blinkThred.sleepTime) ) {
-
     digitalWrite(ledPin, blinkLedState);
     blinkLedState = !blinkLedState;
     blinkThred.timestamp = millis();
   }
 }
-
 void turnLedOn() {
   blinkLedThreadSleep(20);
 }
@@ -216,7 +280,6 @@ bool readButtonStateForPin(int inPin) {
     return false;
   }
 }
-
 bool isClawButtonPressed() {
   return readButtonStateForPin(button2Pin);
 }
@@ -224,34 +287,101 @@ bool isFunctionalButtonPressed() {
   return readButtonStateForPin(button1Pin);
 }
 
+// ********************* read ***************
+void readServosPossition() {
+  //read first servo position
+  int servo1 = readServoForPin(servo1InPin);
+  if ( servo1 < currentServoPoint.servo1 - 5 || servo1 > currentServoPoint.servo1 + 5 ) {
+    currentServoPoint.servo1 = servo1;
+  }
+  int servo2 = readServoForPin(servo2InPin);
+  if ( servo2 < currentServoPoint.servo2 - 5 || servo2 > currentServoPoint.servo2 + 5 ) {
+    currentServoPoint.servo2 = servo2;
+  }
+  int servo3 = readServoForPin(servo3InPin);
+  if ( servo3 < currentServoPoint.servo3 - 5 || servo3 > currentServoPoint.servo3 + 5 ) {
+    currentServoPoint.servo3 = servo3;
+  }
+}
+int readServoForPin(int servoPin) {
+  int baseValue = analogRead(servoPin);
+  int basePosition = map(baseValue, 270, 680, 0, 180);
+  return basePosition;
+}
 
+// ********************* debug ***************
+void printCurentServoPointsDEBUG() {
+  Serial.println("ServoPointsStruct");
+    Serial.print("  stepCount :");
+    Serial.println(currentServoPoint.stepCount);
+    Serial.print("  servo1 :");
+    Serial.println(currentServoPoint.servo1);
+    Serial.print("  servo2 :");
+    Serial.println(currentServoPoint.servo2);
+    Serial.print("  servo3 :");
+    Serial.println(currentServoPoint.servo3);
+    Serial.print("  isClawClosed :");
+    Serial.println(currentServoPoint.isClawClosed);
+}
 
+void readServosPossitionDEBUG() {
+  if (Serial.available() > 0) {
+    String str = Serial.readString();// read the incoming data as string
+    if (str[0] == 'x') {
+        str.remove(0,2);
+      int value = str.toInt();
+        currentServoPoint.servo1 = value;
+    } else if (str[0] == 'y') {
+        str.remove(0,2);
+      int value = str.toInt();
+        currentServoPoint.servo2 = value;
+    } else if (str[0] == 'z') {
+        str.remove(0,2);
+      int value = str.toInt();
+        currentServoPoint.servo3 = value;
+    } else {
+      printCurentServoPointsDEBUG();
+    }
+  }
+}
 
+void writeEEPROMValuesDEBUG() {
+  int EEPROMaddressDEBUG = 0;
 
+  EEPROM.write(EEPROMaddressDEBUG, 1); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0 ); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0); EEPROMaddressDEBUG += 1;
 
-//void readServos() {
-//  int servoVal[3];
-//
-//  servoVal[0] = analogRead(servo2Input);
-//  servoVal[1] = analogRead(servo3Input);
-//  servoVal[2] = analogRead(servo4Input);
-//
-//  Serial.print("servo");
-//
-//  for (int i = 0; i < 3; i++) {
-//    Serial.print(" ");
-//    Serial.print(i);
-//    Serial.print(" = ");
-//    Serial.print(servoVal[i]);
-//  }
-//}
+  EEPROM.write(EEPROMaddressDEBUG, 2); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0 ); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 1); EEPROMaddressDEBUG += 1;
 
-//void readBase() {
-//
-//  int baseValue = analogRead(baseInput);
-//  int basePosition = map(baseValue, 270, 680, 0, 180);
-//
-//  Serial.print("   - base ");
-//  Serial.print(" = ");
-//  Serial.println(basePosition);
-//}
+  EEPROM.write(EEPROMaddressDEBUG, 3); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 90); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 60); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 1); EEPROMaddressDEBUG += 1;
+
+  EEPROM.write(EEPROMaddressDEBUG, 4); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 90); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 60); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 180); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 1); EEPROMaddressDEBUG += 1;
+
+  EEPROM.write(EEPROMaddressDEBUG, 5); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 180); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 90); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 180); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 1); EEPROMaddressDEBUG += 1;
+
+  EEPROM.write(EEPROMaddressDEBUG, 6); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 90); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 90); EEPROMaddressDEBUG += 1;
+  EEPROM.write(EEPROMaddressDEBUG, 0); EEPROMaddressDEBUG += 1;
+  
+}
