@@ -190,9 +190,9 @@ void servoThreadSleep(int milliseconds) {
 // ********************* claw ******************
 void closeOpenClaw() {
   if (currentServoPoint.isClawClosed) {
-    ClawServo.write(0);
+    ClawServo.write(55);
   } else {
-    ClawServo.write(180);
+    ClawServo.write(170);
   }
   currentServoPoint.isClawClosed = !currentServoPoint.isClawClosed;
   mainThreadSleep(200); // short delay on main thread ... why main ??
@@ -300,7 +300,7 @@ void readServosPossition() {
 }
 int readServoForPin(int servoPin) {
   int baseValue = analogRead(servoPin);
-  int basePosition = map(baseValue, 270, 680, 0, 180);
+  int basePosition = map(baseValue, 63, 662, 0, 180);
   return basePosition;
 }
 
