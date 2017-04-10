@@ -60,7 +60,7 @@ void setup() {
   Serial.begin(9600);
 
   // generate some debug data and write it to EEPROM
-  writeEEPROMValuesDEBUG();
+//  writeEEPROMValuesDEBUG();
 }
 
 void loop() {
