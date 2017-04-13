@@ -47,6 +47,12 @@ void readServosPossition() {
   }
 }
 int readServoForPin(int servoPin) {
+
+  // TODO: close led
+  // TODO: delay ca sa se stabilizeze
+  // TODO: do 10 reads in an array
+  // TODO: get the value tha is most found
+    
   int baseValue = analogRead(servoPin);
   int basePosition = map(baseValue, 63, 662, 0, 180);
   return basePosition;

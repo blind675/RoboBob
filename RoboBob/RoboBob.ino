@@ -184,14 +184,17 @@ void attachAllServos() {
 void moveServos() {
   printCurentServoPointsDEBUG();
   servo1.write(currentServoPoint.servo1);
+  delay(100);
   servo2.write(currentServoPoint.servo2);
+  delay(100);
   servo3.write(currentServoPoint.servo3);
+  delay(100);
   if (currentServoPoint.isClawClosed) {
     ClawServo.write(0);
   } else {
     ClawServo.write(180);
   }
-  servoThreadSleep(1500);
+  servoThreadSleep(500);
 }
 // ********************* claw ******************
 void closeOpenClaw() {
@@ -201,5 +204,5 @@ void closeOpenClaw() {
     ClawServo.write(150);
   }
   currentServoPoint.isClawClosed = !currentServoPoint.isClawClosed;
-  servoThreadSleep(1500); // short delay on main thread ... why main ??
+  delay(100); // real delay :)
 }
