@@ -16,7 +16,6 @@ bool isFunctionalButtonPressed() {
 
 // ********************* read servos positions ***************
 void readServosPossition() {
-  //read first servo position
   int servo1 = readServoForPin(servo1InPin);
   // do some servo corrections
   if ( servo1 > 200 ) {
@@ -24,36 +23,43 @@ void readServosPossition() {
   } else if ( servo1 > 180 ) {
     servo1 = 175;
   }
-  if ( servo1 < currentServoPoint.servo1 - 5 || servo1 > currentServoPoint.servo1 + 5 ) {
-    currentServoPoint.servo1 = servo1;
-  }
+  currentServoPoint.servo1 = servo1;
+    
   int servo2 = readServoForPin(servo2InPin);
   if ( servo2 > 200 ) {
     servo2 = 5;
   } else if ( servo2 > 180 ) {
     servo2 = 175;
   }
-  if ( servo2 < currentServoPoint.servo2 - 5 || servo2 > currentServoPoint.servo2 + 5 ) {
-    currentServoPoint.servo2 = servo2;
-  }
+  currentServoPoint.servo2 = servo2;
+  
   int servo3 = readServoForPin(servo3InPin);
   if ( servo3 > 200 ) {
     servo3 = 5;
   } else if ( servo3 > 180 ) {
     servo3 = 175;
   }
-  if ( servo3 < currentServoPoint.servo3 - 5 || servo3 > currentServoPoint.servo3 + 5 ) {
-    currentServoPoint.servo3 = servo3;
-  }
+  currentServoPoint.servo3 = servo3;
+  
+  lastServoPoint = currentServoPoint;
 }
 int readServoForPin(int servoPin) {
-
-  // TODO: close led
-  // TODO: delay ca sa se stabilizeze
-  // TODO: do 10 reads in an array
-  // TODO: get the value tha is most found
-    
-  int baseValue = analogRead(servoPin);
+  //close led
+  digitalWrite(ledPin, LOW);
+  //delay to stabilized
+  delay(10);
+  mainThreadSleep(10);
+  //do 10 reads in an array
+  Average<int> values(10);
+  for(int i=0 ; i < 10 ; i++) {
+    int readValue = analogRead(servoPin);
+    values.push(readValue);
+  }
+  //get the value that is most found
+  int baseValue = values.mode();
+  // correnction trim the edges
+  baseValue =  baseValue < 63 ? 63 : baseValue;
+  baseValue =  baseValue > 662 ? 662 : baseValue;
   int basePosition = map(baseValue, 63, 662, 0, 180);
   return basePosition;
 }

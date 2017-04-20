@@ -1,17 +1,19 @@
 #include <EEPROM.h>
 #include <Servo.h>
+#include <Average.h>
 
 #define servo1Pin           11
 #define servo1InPin         A2
 #define servo2Pin           10
-#define servo2InPin         A4
+#define servo2InPin         A3
 #define servo3Pin            9
-#define servo3InPin         A3
+#define servo3InPin         A4
 #define clawServoPin         3
 #define button1Pin           8      // functional button
 #define button2Pin           4      // claw button
 #define ledPin               2
 #define EEPROMStartAddress   0
+#define SERVO_DELAY         25
 
 Servo ClawServo;
 Servo servo1;
@@ -25,7 +27,8 @@ typedef struct {
   bool isClawClosed;
 } ServoPoint;
 
-ServoPoint currentServoPoint = {0, 0, 0, false};
+ServoPoint currentServoPoint = {90, 90, 90, false};
+ServoPoint lastServoPoint = {90, 90, 90, false};
 byte totalStepsCount = 0;
 byte currentStepCount = 0;
 ServoPoint allPoints[20];
@@ -80,18 +83,19 @@ void runMainThread() {
 
     switch (currentState) {
       case START:
-        Serial.println("**** START state ****");
+        //        Serial.println("**** START state ****");
         if (haveSavedSequence()) {
           readServoStepsFromEEPROM();
           currentState = RUN_SEQUNECE;
           turnLedOn();
         } else {
+          blinkLedSlow();
           currentState = WAINT_FOR_POSITION;
           stopServoThread();
         }
         break;
       case RUN_SEQUNECE:
-        Serial.println("**** RUN SEQUNECE state ****");
+        //        Serial.println("**** RUN SEQUNECE state ****");
         startServoThread();
         if (isClawButtonPressed() || isFunctionalButtonPressed()) {
           blinkLedSlow();
@@ -103,7 +107,7 @@ void runMainThread() {
         }
         break;
       case WAINT_FOR_POSITION:
-        Serial.println("**** WAINT FOR POSITION state ****");
+        //        Serial.println("**** WAINT FOR POSITION state ****");
         if (isFunctionalButtonPressed()) {
           blinkLedFast();
           currentState = SAVE_POSITION;
@@ -112,11 +116,11 @@ void runMainThread() {
         }
         break;
       case SAVE_POSITION:
-        Serial.println("**** SAVE POSITION state ****");
+        //        Serial.println("**** SAVE POSITION state ****");
         readServosPossition();
         // add the currentServoPoint to the array;
         currentStepCount += 1;
-        totalStepsCount +=1;
+        totalStepsCount += 1;
         if ( currentStepCount == 21 ) {
           currentStepCount = 1;
           saveServoPositionsToEEPROM();
@@ -124,16 +128,16 @@ void runMainThread() {
           currentState = RUN_SEQUNECE;
           mainThreadSleep(500);
         } else {
-          allPoints[currentStepCount-1] = currentServoPoint;
+          allPoints[currentStepCount - 1] = currentServoPoint;
         }
         printCurentServoPointsDEBUG();
-        mainThreadSleep(500); // short delay on main thread
+        mainThreadSleep(1500); // short delay on main thread
         if (isFunctionalButtonPressed()) {
           currentStepCount = 1;
           saveServoPositionsToEEPROM();
           turnLedOn();
           currentState = RUN_SEQUNECE;
-          mainThreadSleep(500);
+          mainThreadSleep(1000);
         } else {
           blinkLedSlow();
           currentState = WAINT_FOR_POSITION;
@@ -158,7 +162,7 @@ void stopServoThread() {
 }
 void runServoThread() {
   if (servoThread.isThreadAlive && (millis() - servoThread.timestamp > servoThread.sleepTime )) {
-    currentStepCount +=1;
+    currentStepCount += 1;
     if ( currentStepCount == totalStepsCount + 1) {
       currentStepCount = 1;
     }
@@ -183,26 +187,85 @@ void attachAllServos() {
 
 void moveServos() {
   printCurentServoPointsDEBUG();
-  servo1.write(currentServoPoint.servo1);
-  delay(100);
-  servo2.write(currentServoPoint.servo2);
-  delay(100);
-  servo3.write(currentServoPoint.servo3);
-  delay(100);
-  if (currentServoPoint.isClawClosed) {
-    ClawServo.write(0);
-  } else {
-    ClawServo.write(180);
+  // TODO: refactor this in a decent code
+  if (lastServoPoint.servo1 != currentServoPoint.servo1) {
+    if (lastServoPoint.servo1 < currentServoPoint.servo1 )  {
+      for ( byte x = lastServoPoint.servo1 + 1; x < currentServoPoint.servo1; x++) {
+        servo1.write(x);
+        delay(SERVO_DELAY);
+      }
+    } else {
+      for ( byte x = lastServoPoint.servo1 - 1; x > currentServoPoint.servo1; x--) {
+        servo1.write(x);
+        delay(SERVO_DELAY);
+      }
+    }
   }
-  servoThreadSleep(500);
+
+  if (lastServoPoint.servo2 != currentServoPoint.servo2) {
+    if (lastServoPoint.servo2 < currentServoPoint.servo2)  {
+      for ( byte y = lastServoPoint.servo2 + 1; y < currentServoPoint.servo2; y++) {
+        servo2.write(y);
+        delay(SERVO_DELAY);
+      }
+    } else {
+      for ( byte y = lastServoPoint.servo2 - 1; y > currentServoPoint.servo2; y--) {
+        servo2.write(y);
+        delay(SERVO_DELAY);
+      }
+    }
+  }
+
+  if (lastServoPoint.servo3 != currentServoPoint.servo3) {
+    if (lastServoPoint.servo3 < currentServoPoint.servo3 )  {
+      for ( byte z = lastServoPoint.servo3 + 1; z < currentServoPoint.servo3; z++) {
+        servo3.write(z);
+        delay(SERVO_DELAY);
+      }
+    } else {
+      for ( byte z = lastServoPoint.servo3 - 1; z > currentServoPoint.servo3; z--) {
+        servo3.write(z);
+        delay(SERVO_DELAY);
+      }
+    }
+  }
+
+  if (lastServoPoint.isClawClosed != currentServoPoint.isClawClosed) {
+    if (currentServoPoint.isClawClosed) {
+      for (byte i = 55; i < 150; i++) {
+        ClawServo.write(i);
+        delay(SERVO_DELAY);
+      }
+    } else {
+      for (byte i = 150; i > 55; i--) {
+        ClawServo.write(i);
+        delay(SERVO_DELAY);
+      }
+    }
+  }
+
+  lastServoPoint = currentServoPoint;
+  delay(100);
+  mainThreadSleep(400);
+  servoThreadSleep(400);
 }
+
 // ********************* claw ******************
 void closeOpenClaw() {
   if (currentServoPoint.isClawClosed) {
-    ClawServo.write(55);
+    for (byte i = 150; i > 55; i--) {
+      ClawServo.write(i);
+      delay(SERVO_DELAY);
+    }
+    Serial.println("CLOSED");
   } else {
-    ClawServo.write(150);
+    for (byte i = 55; i < 150; i++) {
+      ClawServo.write(i);
+      delay(SERVO_DELAY);
+    }
+    Serial.println("OPEN");
   }
   currentServoPoint.isClawClosed = !currentServoPoint.isClawClosed;
-  delay(100); // real delay :)
+  //  mainThreadSleep(2500);
+  //  servoThreadSleep(2500);
 }
